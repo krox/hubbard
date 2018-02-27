@@ -10,75 +10,96 @@ using Eigen::VectorXd;
 
 class Hubbard
 {
-public:
+	// random number generator
 	std::random_device rd;
 	std::mt19937 rng;
 
-	int Nx,Ny,N,L;
-	double beta,U,mu,dt,lambda;
+public:
 
-	MatrixXd K, expK;
-	MatrixXd s, expVu, expVd;
-	MatrixXd gu,gd;
+	int N,L; // geometry of the lattice
+	double beta,U,mu; // parameters of Hamiltonian
+	double dt,lambda; // effective parameters of aux field
 
-	Hubbard(int Nx, int Ny, int L)
-		: rng(rd()), Nx(Nx), Ny(Ny), N(Nx*Ny), L(L), K(N,N), expK(N,N), s(N,L), expVu(N,L), expVd(N,L), gu(N,N), gd(N,N)
+	MatrixXd K, expK; // kinetic operator (fixed during simulation)
+	MatrixXd s; // aux field (dynamic variable)
+	MatrixXd gu,gd; // greens functions (computed from s and K)
+
+	Hubbard(int Nx, int Ny, int L, double beta, double U, double mu)
+		: rng(rd()), N(Nx*Ny), L(L), K(N,N), expK(N,N), s(N,L), gu(N,N), gd(N,N)
 	{
-		// input parameters
-		beta = 1.0;
-		U = 4.0;
-		mu = 0.0;
-
-		// constants
-		N = Nx*Ny;
-		dt = beta/L;
-		lambda = acosh(exp(dt*U/2));
-
-		// kinetic matrix K (independant of l)
+		// set off-diagonal elements of K
+		// which only depend on geomety, not on parameters (in our convention)
 		for(int i = 0; i < N; ++i)
 			for(int j = 0; j < N; ++j)
 				K(i,j) = 0.0;
 		for(int x = 0; x < Nx; ++x)
 			for(int y = 0; y < Ny; ++y)
 			{
-				K(x + Nx*y, x + Nx*y) = mu;
 				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
 				K(((x+1)%Nx) + Nx*y,x + Nx*y) = 1.0;
 				K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
 				K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
 			}
-		expK = (-dt*K).exp();//matExp(-dt*K);
 
-		// aux field s (random init)
+		initRandom();
+		setParams(beta, U, mu);
+	}
+
+	/** set simulation parameters without changing current field config */
+	void setParams(double beta, double U, double mu)
+	{
+		// TODO: actually support chemical potential (requires reweighting)
+		assert(mu == 0);
+
+		// set parameters
+		this->beta = beta;
+		this->U = U;
+		this->mu = mu;
+		this->dt = beta/L;
+		this->lambda = acosh(exp(0.5*dt*U));
+
+		// compute new kinetic operator
+		// (note: the off-diagonal elements are fixed by geometry)
+		for(int i = 0; i < N; ++i)
+			K(i,i) = mu;
+		expK = (-dt*K).exp();
+
+		// greens functions depend on K, so update them
+		computeGreens();
+	}
+
+	/** set the field config to random */
+	void initRandom()
+	{
 		std::bernoulli_distribution dist(0.5);
 		for(int i = 0; i < N; ++i)
 			for(int l = 0; l < L; ++l)
 				s(i,l) = dist(rng)?+1.0:-1.0;
-
-		// potential 'matrix' (diagonal in i)
-		for(int i = 0; i < N; ++i)
-			for(int l = 0; l < L; ++l)
-			{
-				expVu(i,l) = exp(+lambda*s(i,l));
-				expVd(i,l) = exp(-lambda*s(i,l));
-			}
-
-		computeGreens();
 	}
 
+	/** compute greens functions from scratch */
 	void computeGreens()
 	{
 		gu = MatrixXd::Identity(N,N);
 		gd = MatrixXd::Identity(N,N);
 		for(int l = 0; l < L; ++l)
 		{
-			gu = expK * expVu.col(l).asDiagonal() * gu;
-			gd = expK * expVd.col(l).asDiagonal() * gd;
+			gu = makeBl(l,+1)*gu;
+			gd = makeBl(l,-1)*gd;
 		}
 		gu = (MatrixXd::Identity(N,N)+gu).inverse();
 		gd = (MatrixXd::Identity(N,N)+gd).inverse();
 	}
 
+	MatrixXd makeBl(int l, int sigma)
+	{
+		MatrixXd r = expK;
+		for(int i = 0; i < N; ++i)
+			r.col(i) *= exp(sigma*lambda*s(i,l));
+		return r;
+	}
+
+	/** do one sweep of the simulation */
 	void thermalize()
 	{
 		// start with fresh greens functions
@@ -103,17 +124,17 @@ public:
 
 					// update field itself
 					s(i,l) = -s(i,l);
-					expVu(i,l) = exp(+lambda*s(i,l));
-					expVd(i,l) = exp(-lambda*s(i,l));
 				}
 			}
 
 			// 'wrap' the greens functions
-			MatrixXd Blu = expK * expVu.col(l).asDiagonal();
+			MatrixXd Blu = makeBl(l,+1);
 			gu = Blu * gu * Blu.inverse();
-			MatrixXd Bld = expK * expVd.col(l).asDiagonal();
+			MatrixXd Bld = makeBl(l,-1);
 			gd = Bld * gd * Bld.inverse();
 		}
+
+		// end with fresh greens functions
 		computeGreens();
 	}
 
@@ -143,7 +164,7 @@ public:
 
 int main()
 {
-	auto hubb = Hubbard(6,6,10);
+	auto hubb = Hubbard(6,6,10,1.0,4.0,0.0);
 	for(int i = 0; i < 200; ++i)
 	{
 		std::cout << "thermlize " << i << std::endl;
