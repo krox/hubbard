@@ -1,12 +1,15 @@
 #include <iostream>
-#include <Eigen/Dense>
 #include <cmath>
 #include <cassert>
 #include <random>
+
+#include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
+#include "matplotlibcpp.h"
+namespace plt = matplotlibcpp;
 
 class Hubbard
 {
@@ -24,7 +27,7 @@ public:
 	MatrixXd s; // aux field (dynamic variable)
 	MatrixXd gu,gd; // greens functions (computed from s and K)
 
-	Hubbard(int Nx, int Ny, int L, double beta, double U, double mu)
+	Hubbard(int Nx, int Ny, int L)
 		: rng(rd()), N(Nx*Ny), L(L), K(N,N), expK(N,N), s(N,L), gu(N,N), gd(N,N)
 	{
 		// set off-diagonal elements of K
@@ -42,7 +45,6 @@ public:
 			}
 
 		initRandom();
-		setParams(beta, U, mu);
 	}
 
 	/** set simulation parameters without changing current field config */
@@ -154,28 +156,50 @@ public:
 		}
 	}
 
-	void print()
+	void clearStats()
+	{
+		nn = 0;
+		nu = 0;
+		nd = 0;
+		nud = 0;
+	}
+
+	void print() const
 	{
 		std::cout << "<up> = " << nu/nn << std::endl;
 		std::cout << "<down> = " << nu/nn << std::endl;
 		std::cout << "<up*down> = " << nud/nn << std::endl;
 	}
+
+	double mag() const
+	{
+		return nu/nn + nd/nn - 2*nud/nn;
+	}
 };
 
 int main()
 {
-	auto hubb = Hubbard(6,6,10,1.0,4.0,0.0);
-	for(int i = 0; i < 200; ++i)
-	{
-		std::cout << "thermlize " << i << std::endl;
-		hubb.thermalize();
-	}
-	for(int i = 0; i < 800; ++i)
-	{
-		std::cout << "thermlize+measure " << i << std::endl;
-		hubb.measure();
-		hubb.thermalize();
-	}
+	auto hubb = Hubbard(6,6,10);
 
-	hubb.print();
+	double mu = 0.0;
+	double U = 4.0;
+
+	std::vector<double> xs,ys;
+	for(double beta = 0.01; beta < 1; beta *= 1.02)
+	{
+		hubb.setParams(beta, U, mu);
+		hubb.clearStats();
+		for(int i = 0; i < 20; ++i)
+			hubb.thermalize();
+		for(int i = 0; i < 20; ++i)
+		{
+			hubb.thermalize();
+			hubb.measure();
+		}
+		std::cout << "U = " << U << ", up/down/updown = " << hubb.nu/hubb.nn << " " << hubb.nd/hubb.nn << " " << hubb.nud/hubb.nn << std::endl;
+		xs.push_back(log(1.0/beta));
+		ys.push_back(hubb.mag());
+	}
+	plt::plot(xs, ys);
+	plt::show();
 }
