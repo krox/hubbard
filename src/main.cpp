@@ -11,10 +11,13 @@ using Eigen::VectorXd;
 #include "matplotlibcpp.h"
 namespace plt = matplotlibcpp;
 
+#include "boost/program_options.hpp"
+namespace po = boost::program_options;
+
 class Hubbard
 {
 	// random number generator
-	std::random_device rd;
+	static std::random_device rd;
 	std::mt19937 rng;
 
 public:
@@ -26,6 +29,8 @@ public:
 	MatrixXd K, expK; // kinetic operator (fixed during simulation)
 	MatrixXd s; // aux field (dynamic variable)
 	MatrixXd gu,gd; // greens functions (computed from s and K)
+
+	Hubbard() = default;
 
 	Hubbard(bool honeycomb, int Nx, int Ny, int L)
 		: rng(rd()), N(Nx*Ny), L(L), K(N,N), expK(N,N), s(N,L), gu(N,N), gd(N,N)
@@ -244,24 +249,50 @@ public:
 	}
 };
 
-int main()
+std::random_device Hubbard::rd;
+
+int main(int argc, char** argv)
 {
-	auto hubb = Hubbard(false, 6,6,10);
-	//auto hubb = Hubbard(true, 12,6,10);
+	po::options_description desc("Allowed options");
+	desc.add_options()
+		("help", "produce help message")
+		("n", po::value<int>()->default_value(6), "(spatial) size of lattice")
+		("l", po::value<int>()->default_value(10), "(imaginary time) size of lattice")
+		("beta", po::value<double>()->default_value(1), "inverse temperature")
+		("honey", po::value<bool>()->default_value(false), "honeycomb-lattice");
+	;
+
+	po::variables_map vm;
+	po::store(po::parse_command_line(argc, argv, desc), vm);
+	po::notify(vm);
+
+	if(vm.count("help")){
+		std::cout << desc << "\n";
+		return 1;
+	}
 
 	double mu = 0.0;
-	double U = 8.0;
-	//double beta = 5;
+	double beta = vm["beta"].as<double>();
+	int n = vm["n"].as<int>();
+	int l = vm["l"].as<int>();
+
+	//auto hubb = Hubbard(false, 6,6,10);
+	Hubbard hubb;
+	if(vm["honey"].as<bool>())
+		hubb = Hubbard(true, 2*n,n, l);
+	else
+		hubb = Hubbard(false, n,n, l);
 
 	std::vector<double> xs,ys;
-	for(double T = 100; T >= 0.5; T *= 0.95)
+	for(double U = 2; U <= 6; U += 0.3)
+	//for(double T = 100; T >= 0.5; T *= 0.95)
 	{
-		double beta = 1.0/T;
+		//double beta = 1.0/T;
 		hubb.setParams(beta, U, mu);
 		hubb.clearStats();
-		for(int i = 0; i < 20; ++i)
+		for(int i = 0; i < 10; ++i)
 			hubb.thermalize();
-		for(int i = 0; i < 20; ++i)
+		for(int i = 0; i < 10; ++i)
 		{
 			hubb.thermalize();
 			hubb.measure();
@@ -271,9 +302,11 @@ int main()
 		<< " U = " << U
 		<< " mu = " << mu
 		<< ", up/down/updown = " << hubb.nu/hubb.nn << " " << hubb.nd/hubb.nn << " " << hubb.nud/hubb.nn << std::endl;
-		xs.push_back(T);
+		//xs.push_back(T);
+		xs.push_back(U);
 		ys.push_back(hubb.mag());
 	}
-	plt::semilogx(xs, ys);
+	//plt::semilogx(xs, ys);
+	plt::plot(xs,ys);
 	plt::show();
 }
