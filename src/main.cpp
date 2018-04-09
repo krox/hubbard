@@ -85,7 +85,8 @@ public:
 		expK = (-dt*K).exp();
 
 		// greens functions depend on K, so update them
-		computeGreens();
+		computeGreens(0, +1);
+		computeGreens(0, -1);
 	}
 
 	/** set the field config to random */
@@ -98,17 +99,54 @@ public:
 	}
 
 	/** compute greens functions from scratch */
-	void computeGreens(int l0 = 0)
+	void computeGreensNaive(int l0, int sigma)
 	{
-		gu = MatrixXd::Identity(N,N);
-		gd = MatrixXd::Identity(N,N);
+		MatrixXd g = MatrixXd::Identity(N,N);
 		for(int l = 0; l < L; ++l)
+			g = makeBl((l+l0)%L, sigma)*g;
+
+		g = (MatrixXd::Identity(N,N) + g).inverse();
+
+		if(sigma == +1) gu = g;
+		else if(sigma == -1) gd = g;
+		else assert(false);
+	}
+
+	/** ditto, with QR decomposition */
+	void computeGreens(int l0, int sigma)
+	{
+		// SVD decomposition B = USV*
+		MatrixXd B0 = makeBl(l0%L, sigma);
+		auto svd = B0.bdcSvd(Eigen::ComputeFullU|Eigen::ComputeFullV);
+		VectorXd S = svd.singularValues();
+		MatrixXd U = svd.matrixU();
+		MatrixXd V = svd.matrixV();
+
+		for(int l = 1; l < L; ++l)
 		{
-			gu = makeBl((l+l0)%L,+1)*gu;
-			gd = makeBl((l+l0)%L,-1)*gd;
+			MatrixXd Bl = makeBl((l+l0)%L, sigma);
+			MatrixXd C = (Bl*U)*S.asDiagonal();
+			svd = C.bdcSvd(Eigen::ComputeFullU|Eigen::ComputeFullV);
+			S = svd.singularValues();
+			U = svd.matrixU();
+			V = V*svd.matrixV();
 		}
-		gu = (MatrixXd::Identity(N,N)+gu).inverse();
-		gd = (MatrixXd::Identity(N,N)+gd).inverse();
+		VectorXd Sb(S.size());
+		VectorXd Ss(S.size());
+		for(int i = 0; i < S.size(); ++i)
+		{
+			if(fabs(S(i)) > 1)
+				{ Sb(i) = S(i); Ss(i) = 1.0; }
+			else
+				{ Sb(i) = 1.0; Ss(i) = S(i); }
+		}
+
+		MatrixXd H = Sb.asDiagonal().inverse() * U.transpose() + Ss.asDiagonal()*V.transpose();
+		MatrixXd g = H.colPivHouseholderQr().solve(Sb.asDiagonal().inverse()*U.transpose());
+
+		if(sigma == +1) gu = g;
+		else if(sigma == -1) gd = g;
+		else assert(false);
 	}
 
 	MatrixXd makeBl(int l, int sigma)
@@ -123,7 +161,8 @@ public:
 	void thermalize()
 	{
 		// start with fresh greens functions
-		computeGreens();
+		computeGreens(0, +1);
+		computeGreens(0, -1);
 
 		for(int l = 0; l < L; ++l)
 		{
@@ -147,16 +186,25 @@ public:
 				}
 			}
 
-			// 'wrap' the greens functions
-			/*MatrixXd Blu = makeBl(l,+1);
-			gu = Blu * gu * Blu.inverse();
-			MatrixXd Bld = makeBl(l,-1);
-			gd = Bld * gd * Bld.inverse();*/
-			computeGreens(l+1);
+			if(l%5 == 0)
+			{
+				computeGreens(l+1, +1);
+				computeGreens(l+1, -1);
+			}
+			else
+			{
+				// 'wrap' the greens functions
+				MatrixXd Blu = makeBl(l,+1);
+				gu = Blu * gu * Blu.inverse();
+				MatrixXd Bld = makeBl(l,-1);
+				gd = Bld * gd * Bld.inverse();
+			}
+
 		}
 
 		// end with fresh greens functions
-		computeGreens();
+		computeGreens(0, +1);
+		computeGreens(0, -1);
 	}
 
 	double nn = 0.0;
