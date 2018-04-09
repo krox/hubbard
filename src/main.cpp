@@ -27,7 +27,7 @@ public:
 	MatrixXd s; // aux field (dynamic variable)
 	MatrixXd gu,gd; // greens functions (computed from s and K)
 
-	Hubbard(int Nx, int Ny, int L)
+	Hubbard(bool honeycomb, int Nx, int Ny, int L)
 		: rng(rd()), N(Nx*Ny), L(L), K(N,N), expK(N,N), s(N,L), gu(N,N), gd(N,N)
 	{
 		// set off-diagonal elements of K
@@ -35,15 +35,33 @@ public:
 		for(int i = 0; i < N; ++i)
 			for(int j = 0; j < N; ++j)
 				K(i,j) = 0.0;
-		for(int x = 0; x < Nx; ++x)
-			for(int y = 0; y < Ny; ++y)
-			{
-				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
-				K(((x+1)%Nx) + Nx*y,x + Nx*y) = 1.0;
-				K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
-				K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
-			}
-
+		if(honeycomb)
+		{
+			assert(Nx == 2*Ny);
+			for(int x = 0; x < Nx; ++x)
+				for(int y = 0; y < Ny; ++y)
+				{
+					K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
+					K(((x+1)%Nx) + Nx*y, x + Nx*y) = 1.0;
+					if(x%2 == 0)
+					{
+						K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
+						K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
+					}
+				}
+		}
+		else
+		{
+			assert(Nx == Ny);
+			for(int x = 0; x < Nx; ++x)
+				for(int y = 0; y < Ny; ++y)
+				{
+					K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
+					K(((x+1)%Nx) + Nx*y, x + Nx*y) = 1.0;
+					K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
+					K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
+				}
+		}
 		initRandom();
 	}
 
@@ -80,14 +98,14 @@ public:
 	}
 
 	/** compute greens functions from scratch */
-	void computeGreens()
+	void computeGreens(int l0 = 0)
 	{
 		gu = MatrixXd::Identity(N,N);
 		gd = MatrixXd::Identity(N,N);
 		for(int l = 0; l < L; ++l)
 		{
-			gu = makeBl(l,+1)*gu;
-			gd = makeBl(l,-1)*gd;
+			gu = makeBl((l+l0)%L,+1)*gu;
+			gd = makeBl((l+l0)%L,-1)*gd;
 		}
 		gu = (MatrixXd::Identity(N,N)+gu).inverse();
 		gd = (MatrixXd::Identity(N,N)+gd).inverse();
@@ -130,10 +148,11 @@ public:
 			}
 
 			// 'wrap' the greens functions
-			MatrixXd Blu = makeBl(l,+1);
+			/*MatrixXd Blu = makeBl(l,+1);
 			gu = Blu * gu * Blu.inverse();
 			MatrixXd Bld = makeBl(l,-1);
-			gd = Bld * gd * Bld.inverse();
+			gd = Bld * gd * Bld.inverse();*/
+			computeGreens(l+1);
 		}
 
 		// end with fresh greens functions
@@ -179,14 +198,17 @@ public:
 
 int main()
 {
-	auto hubb = Hubbard(6,6,10);
+	auto hubb = Hubbard(false, 6,6,10);
+	//auto hubb = Hubbard(true, 12,6,10);
 
 	double mu = 0.0;
-	double U = 4.0;
+	double U = 8.0;
+	//double beta = 5;
 
 	std::vector<double> xs,ys;
-	for(double beta = 0.01; beta < 1; beta *= 1.02)
+	for(double T = 100; T >= 0.5; T *= 0.95)
 	{
+		double beta = 1.0/T;
 		hubb.setParams(beta, U, mu);
 		hubb.clearStats();
 		for(int i = 0; i < 20; ++i)
@@ -196,10 +218,14 @@ int main()
 			hubb.thermalize();
 			hubb.measure();
 		}
-		std::cout << "U = " << U << ", up/down/updown = " << hubb.nu/hubb.nn << " " << hubb.nd/hubb.nn << " " << hubb.nud/hubb.nn << std::endl;
-		xs.push_back(log(1.0/beta));
+		std::cout
+		<< " beta = " << beta
+		<< " U = " << U
+		<< " mu = " << mu
+		<< ", up/down/updown = " << hubb.nu/hubb.nn << " " << hubb.nd/hubb.nn << " " << hubb.nud/hubb.nn << std::endl;
+		xs.push_back(T);
 		ys.push_back(hubb.mag());
 	}
-	plt::plot(xs, ys);
+	plt::semilogx(xs, ys);
 	plt::show();
 }
