@@ -11,6 +11,47 @@ namespace po = boost::program_options;
 
 #include <hubbard.h>
 
+double compute(int n, int l, bool honey, double beta, double U, double mu, int nwarm, int nmeas)
+{
+	if(l%blockSize != 0)
+	{
+		std::cout << "ERROR: L must be a multiple of block-size which is " << blockSize << std::endl;
+		return 1;
+	}
+
+	Hubbard hubb;
+	if(honey)
+		hubb = Hubbard(true, 2*n,n, l);
+	else
+		hubb = Hubbard(false, n,n, l);
+
+	hubb.setParams(beta, U, mu);
+	hubb.clearStats();
+
+	for(int i = 0; i < nwarm; ++i)
+	{
+		if(nwarm < 20 || i%10 == 0)
+			std::cout << "warmup sweep " << i << std::endl;
+		hubb.thermalize();
+	}
+
+	for(int i = 0; i < nmeas; ++i)
+	{
+		if(nmeas < 20 || i%10 == 0)
+			std::cout << "measurment sweep " << i << std::endl;
+		hubb.thermalize();
+		hubb.measure();
+	}
+
+	std::cout << "n    = " << n << std::endl;
+	std::cout << "L    = " << l << std::endl;
+	std::cout << "U    = " << U << std::endl;
+	std::cout << "beta = " << beta << std::endl;
+	hubb.print();
+
+	return hubb.mag();
+}
+
 int main(int argc, char** argv)
 {
 	po::options_description desc("Allowed options");
@@ -45,39 +86,5 @@ int main(int argc, char** argv)
 	int l = (int)ceil(beta*sqrt(U/trott));
 	l = (l+blockSize-1)/blockSize*blockSize;
 
-	if(l%blockSize != 0)
-	{
-		std::cout << "ERROR: L must be a multiple of block-size which is " << blockSize << std::endl;
-		return 1;
-	}
-
-	Hubbard hubb;
-	if(vm["honey"].as<bool>())
-		hubb = Hubbard(true, 2*n,n, l);
-	else
-		hubb = Hubbard(false, n,n, l);
-
-	hubb.setParams(beta, U, mu);
-	hubb.clearStats();
-
-	for(int i = 0; i < nwarm; ++i)
-	{
-		if(nwarm < 20 || i%10 == 0)
-			std::cout << "warmup sweep " << i << std::endl;
-		hubb.thermalize();
-	}
-
-	for(int i = 0; i < nmeas; ++i)
-	{
-		if(nmeas < 20 || i%10 == 0)
-			std::cout << "measurment sweep " << i << std::endl;
-		hubb.thermalize();
-		hubb.measure();
-	}
-
-	std::cout << "n    = " << n << std::endl;
-	std::cout << "L    = " << l << std::endl;
-	std::cout << "U    = " << U << std::endl;
-	std::cout << "beta = " << beta << std::endl;
-	hubb.print();
+	compute(n, l, vm["honey"].as<bool>(), beta, U, mu, nwarm, nmeas);
 }
