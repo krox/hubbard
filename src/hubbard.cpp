@@ -1,7 +1,5 @@
 #include <hubbard.h>
 
-#define blockSize 1
-
 std::random_device Hubbard::rd;
 
 Hubbard::Hubbard(bool honeycomb, int Nx, int Ny, int L)

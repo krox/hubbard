@@ -8,7 +8,7 @@
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
-#define blockSize 1
+#define blockSize 5
 
 class Hubbard
 {

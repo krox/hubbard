@@ -17,12 +17,12 @@ int main(int argc, char** argv)
 	desc.add_options()
 		("help", "produce help message")
 		("n", po::value<int>()->default_value(6), "(spatial) size of lattice")
-		("l", po::value<int>()->default_value(10), "(imaginary time) size of lattice")
 		("u", po::value<double>()->default_value(4.0), "interaction strength")
 		("beta", po::value<double>()->default_value(1.0), "inverse temperature")
 		("honey", po::value<bool>()->default_value(false), "honeycomb-lattice")
 		("warm", po::value<int>()->default_value(20), "number of warmup sweeps")
 		("meas", po::value<int>()->default_value(80), "number of measurment sweeps")
+		("trott", po::value<double>()->default_value(0.125), "trotter error")
 	;
 
 	po::variables_map vm;
@@ -36,11 +36,14 @@ int main(int argc, char** argv)
 
 	double mu = 0.0;
 	int n = vm["n"].as<int>();
-	int l = vm["l"].as<int>();
+	double trott = vm["trott"].as<double>();
+
 	double U = vm["u"].as<double>();
 	double beta = vm["beta"].as<double>();
 	int nwarm = vm["warm"].as<int>();
 	int nmeas = vm["meas"].as<int>();
+	int l = (int)ceil(beta*sqrt(U/trott));
+	l = (l+blockSize-1)/blockSize*blockSize;
 
 	if(l%blockSize != 0)
 	{
