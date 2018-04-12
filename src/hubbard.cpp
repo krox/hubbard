@@ -1,4 +1,5 @@
 #include <hubbard.h>
+#include <svdstack.h>
 
 std::random_device Hubbard::rd;
 
@@ -87,50 +88,64 @@ void Hubbard::computeGreensNaive(int l0, int sigma)
 	else assert(false);
 }
 
-/** ditto, with QR decomposition */
-void Hubbard::computeGreens(int l0, int sigma)
+/** returns (1 + USV^T)^-1 */
+static MatrixXd computeGreen(const MatrixXd& U, const VectorXd& S, const MatrixXd& V)
 {
-	// SVD decomposition B = USV*
-	MatrixXd B0 = makeBlockBl(l0%L, sigma);
-	auto svd = B0.bdcSvd(Eigen::ComputeFullU|Eigen::ComputeFullV);
-	VectorXd S = svd.singularValues();
-	MatrixXd U = svd.matrixU();
-	MatrixXd V = svd.matrixV();
-
-	for(int l = blockSize; l < L; l += blockSize)
-	{
-		MatrixXd Bl = makeBlockBl((l+l0)%L, sigma);
-		MatrixXd C = (Bl*U)*S.asDiagonal();
-		svd = C.bdcSvd(Eigen::ComputeFullU|Eigen::ComputeFullV);
-		S = svd.singularValues();
-		U = svd.matrixU();
-		V = V*svd.matrixV();
-	}
-	VectorXd Sb(S.size());
+	// split S = Sbi^-1 * Ss
+	VectorXd Sbi(S.size());
 	VectorXd Ss(S.size());
 	for(int i = 0; i < S.size(); ++i)
 	{
 		if(fabs(S(i)) > 1)
-			{ Sb(i) = S(i); Ss(i) = 1.0; }
+			{ Sbi(i) = 1.0/S(i); Ss(i) = 1.0; }
 		else
-			{ Sb(i) = 1.0; Ss(i) = S(i); }
+			{ Sbi(i) = 1.0; Ss(i) = S(i); }
 	}
 
-	MatrixXd H = Sb.asDiagonal().inverse() * U.transpose() + Ss.asDiagonal()*V.transpose();
-	MatrixXd g = H.colPivHouseholderQr().solve(Sb.asDiagonal().inverse()*U.transpose());
+	// compute (1 + USV^T)^-1 in a stable manner (note that H is kinda good conditioned)
+	MatrixXd H = Sbi.asDiagonal() * U.transpose() + Ss.asDiagonal()*V.transpose();
+	MatrixXd g = H.fullPivHouseholderQr().solve(Sbi.asDiagonal()*U.transpose());
+
+	return g;
+}
+
+/** returns (1 + left * right^T)^-1 in a stable manner */
+static MatrixXd computeGreen(const SvdStack& left, const SvdStack& right)
+{
+	if(left.empty())
+		return computeGreen(right.matrixV(), right.singularValues(), right.matrixU());
+
+	if(right.empty())
+		return computeGreen(left.matrixU(), left.singularValues(), left.matrixV());
+
+	// combine the two SVDs:
+	// U * S * V^T = left*right^T
+	MatrixXd tmp = left.matrixV().transpose() * right.matrixV();
+	tmp = left.singularValues().asDiagonal() * tmp * right.singularValues().asDiagonal();
+	auto svd = tmp.jacobiSvd(Eigen::ComputeFullU|Eigen::ComputeFullV);
+	MatrixXd U = left.matrixU()*svd.matrixU();
+	MatrixXd V = right.matrixU()*svd.matrixV();
+	VectorXd const& S = svd.singularValues();
+
+	return computeGreen(U,S,V);
+}
+
+/** ditto, with QR decomposition */
+void Hubbard::computeGreens(int l0, int sigma)
+{
+	SvdStack stackRight(N,L);
+	for(int l = L-1; l >= l0; --l)
+		stackRight.push(makeBl(l, sigma).transpose());
+	SvdStack stackLeft(N,L);
+	for(int l = 0; l < l0; ++l)
+		stackLeft.push(makeBl(l, sigma));
+	MatrixXd g = computeGreen(stackLeft, stackRight);
 
 	if(sigma == +1) gu = g;
 	else if(sigma == -1) gd = g;
 	else assert(false);
 }
 
-MatrixXd Hubbard::makeBlockBl(int l0, int sigma)
-{
-	MatrixXd r = makeBl(l0, sigma);
-	for(int i = 1; i < blockSize; ++i)
-		r = makeBl((l0+i)%L, sigma)*r;
-	return r;
-}
 
 MatrixXd Hubbard::makeBl(int l, int sigma)
 {
@@ -140,22 +155,44 @@ MatrixXd Hubbard::makeBl(int l, int sigma)
 	return r;
 }
 
+
+
 /** do one sweep of the simulation */
 void Hubbard::thermalize()
 {
-	// start with fresh greens functions
-	computeGreens(0, +1);
-	computeGreens(0, -1);
+	SvdStack stackLeftU(N, L);
+	SvdStack stackLeftD(N, L);
+	SvdStack stackRightU(N, L);
+	SvdStack stackRightD(N, L);
+
+	for(int l = L-1; l >= 0; --l)
+	{
+		stackRightU.push(makeBl(l, +1).transpose());
+		stackRightD.push(makeBl(l, -1).transpose());
+	}
+
+
+	MatrixXd gu_naive;
+	MatrixXd gd_naive;
 
 	for(int l = 0; l < L; ++l)
 	{
+		// stackLeft = B(l-1) *...* B(0)
+		// stackRight = B(l)^T *...* B(L-1)^T
+
+		//create (wrapped) greens at current point
+		// g = (1 + stackLeft * stackRight^T)^-1
+
+		gu = computeGreen(stackLeftU, stackRightU);
+		gd = computeGreen(stackLeftD, stackRightD);
+
 		for(int i = 0; i < N; ++i)
 		{
 			// propose to flip s[i,l]
 			double p = (1 + (1-gu(i,i))*(exp(-2*lambda*s(i,l))-1))
 			         * (1 + (1-gd(i,i))*(exp(+2*lambda*s(i,l))-1));
-			std::bernoulli_distribution dist(std::min(1.0,p));
-			if(dist(rng))
+
+			if(std::bernoulli_distribution(std::min(1.0,p))(rng))
 			{
 				// update greens function (which is wrapped such that the update is at timeslice 0 of g)
 				double factorU = (exp(-2*lambda*s(i,l))-1)/(1 + (1-gu(i,i))*(exp(-2*lambda*s(i,l))-1));
@@ -169,25 +206,21 @@ void Hubbard::thermalize()
 			}
 		}
 
-		if(l%5 == 0)
-		{
-			computeGreens(l+1, +1);
-			computeGreens(l+1, -1);
-		}
-		else
-		{
-			// 'wrap' the greens functions
-			MatrixXd Blu = makeBl(l,+1);
-			gu = Blu * gu * Blu.inverse();
-			MatrixXd Bld = makeBl(l,-1);
-			gd = Bld * gd * Bld.inverse();
-		}
+		// wrap greens function
+		stackRightU.pop();
+		stackRightD.pop();
+		stackLeftU.push(makeBl(l, +1));
+		stackLeftD.push(makeBl(l, -1));
 
+		// 'wrap' the greens functions
+		MatrixXd Blu = makeBl(l,+1);
+		gu_naive = Blu * gu * Blu.inverse();
+		MatrixXd Bld = makeBl(l,-1);
+		gd_naive = Bld * gd * Bld.inverse();
 	}
-
-	// end with fresh greens functions
-	computeGreens(0, +1);
-	computeGreens(0, -1);
+	// end with good greens
+	gu = computeGreen(stackLeftU, stackRightU);
+	gd = computeGreen(stackLeftD, stackRightD);
 }
 
 void Hubbard::measure()

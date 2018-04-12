@@ -13,12 +13,6 @@ namespace po = boost::program_options;
 
 double compute(int n, int l, bool honey, double beta, double U, double mu, int nwarm, int nmeas)
 {
-	if(l%blockSize != 0)
-	{
-		std::cout << "ERROR: L must be a multiple of block-size which is " << blockSize << std::endl;
-		return 1;
-	}
-
 	Hubbard hubb;
 	if(honey)
 		hubb = Hubbard(true, 2*n,n, l);
@@ -84,7 +78,6 @@ int main(int argc, char** argv)
 	int nwarm = vm["warm"].as<int>();
 	int nmeas = vm["meas"].as<int>();
 	int l = (int)ceil(beta*sqrt(U/trott));
-	l = (l+blockSize-1)/blockSize*blockSize;
 
 	compute(n, l, vm["honey"].as<bool>(), beta, U, mu, nwarm, nmeas);
 }

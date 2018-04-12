@@ -8,8 +8,6 @@
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
-#define blockSize 5
-
 class Hubbard
 {
 	// random number generator
@@ -38,10 +36,9 @@ public:
 	/** compute greens functions from scratch */
 	void computeGreensNaive(int l0, int sigma);
 
-	/** ditto, with QR decomposition */
+	/** ditto, with SVD decomposition */
 	void computeGreens(int l0, int sigma);
 
-	MatrixXd makeBlockBl(int l0, int sigma);
 	MatrixXd makeBl(int l, int sigma);
 
 	/** do one sweep of the simulation */
