@@ -52,8 +52,8 @@ int main(int argc, char** argv)
 	po::options_description desc("Allowed options");
 	desc.add_options()
 		("help", "produce help message")
-		("n", po::value<int>()->default_value(6), "(spatial) size of lattice")
-		("u", po::value<double>()->default_value(4.0), "interaction strength")
+		("n", po::value<std::vector<int>>()->multitoken(), "(spatial) size of lattice")
+		("u", po::value<std::vector<double>>()->multitoken(), "interaction strength")
 		("tMin", po::value<double>()->default_value(0.2), "temperature")
 		("tMax", po::value<double>()->default_value(100), "temperature")
 		("honey", "honeycomb-lattice")
@@ -72,10 +72,22 @@ int main(int argc, char** argv)
 	}
 
 	double mu = 0.0;
-	int n = vm["n"].as<int>();
+
+	std::vector<int> ns;
+	if(vm.count("n"))
+		ns = vm["n"].as<std::vector<int>>();
+	else
+		ns.push_back(6);
+
+	std::vector<double> us;
+	if(vm.count("u"))
+		us = vm["u"].as<std::vector<double>>();
+	else
+		us.push_back(4.0);
+
 	double trott = vm["trott"].as<double>();
 
-	double U = vm["u"].as<double>();
+
 	double tMin = vm["tMin"].as<double>();
 	double tMax = vm["tMax"].as<double>();
 	int nwarm = vm["warm"].as<int>();
@@ -86,28 +98,41 @@ int main(int argc, char** argv)
 	plot.setLabelY("magetization");
 	plot.setLogScaleX();
 	plot.setRangeX(tMin, tMax);
+	plot.setRangeY(0.5,0.8);
+	plot.style = "linespoints";
 
-	std::vector<double> xs, ys;
-	for(double T = tMax; T >= tMin; T *= 0.95)
+	std::vector<double> pN, pU;
+	std::vector<std::vector<double>> pT, pM;
+	for(double U : us)
+	for(int n : ns)
 	{
-		// parameters for this run
-		double beta = 1/T;
-		int l = (int)ceil(beta*sqrt(U/trott));
+		pT.emplace_back();
+		pM.emplace_back();
+		pU.push_back(U);
+		pN.push_back(n);
 
-		// do the simulation
-		double mag = compute(n, l, vm.count("honey")!=0, beta, U, mu, nwarm, nmeas);
-
-		// plot the results
-		xs.push_back(T);
-		ys.push_back(mag);
-
-		if(xs.size() >= 2)
+		for(double T = tMax; T >= tMin; T *= 0.95)
 		{
+			// parameters for this run
+			double beta = 1/T;
+			int l = (int)ceil(beta*sqrt(U/trott));
+
+			// do the simulation
+			double mag = compute(n, l, vm.count("honey")!=0, beta, U, mu, nwarm, nmeas);
+
+			// plot the results
+			pT.back().push_back(T);
+			pM.back().push_back(mag);
+
+
 			plot.clear();
-			plot.plotData(xs,ys, fmt::format("n={}, U={}", n, U));
+			for(size_t i = 0; i < pN.size(); ++i)
+				plot.plotData(pT[i], pM[i], fmt::format("n={}, U={}", pN[i], pU[i]));
 			plot.plotFunction([](double t){return 0.5+0.5/t;}, 2.0, tMax);
 		}
+
+		plot.writePNG("plot.png");
 	}
 
-	plot.writePNG("plot.png");
+
 }
