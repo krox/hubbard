@@ -3,11 +3,12 @@
 #include <cassert>
 #include <random>
 
-#include "matplotlibcpp.h"
-namespace plt = matplotlibcpp;
+#include "util/gnuplot.h"
 
 #include "boost/program_options.hpp"
 namespace po = boost::program_options;
+
+#include <fmt/format.h>
 
 #include <hubbard.h>
 
@@ -53,8 +54,9 @@ int main(int argc, char** argv)
 		("help", "produce help message")
 		("n", po::value<int>()->default_value(6), "(spatial) size of lattice")
 		("u", po::value<double>()->default_value(4.0), "interaction strength")
-		("beta", po::value<double>()->default_value(1.0), "inverse temperature")
-		("honey", po::value<bool>()->default_value(false), "honeycomb-lattice")
+		("tMin", po::value<double>()->default_value(0.2), "temperature")
+		("tMax", po::value<double>()->default_value(100), "temperature")
+		("honey", "honeycomb-lattice")
 		("warm", po::value<int>()->default_value(20), "number of warmup sweeps")
 		("meas", po::value<int>()->default_value(80), "number of measurment sweeps")
 		("trott", po::value<double>()->default_value(0.125), "trotter error")
@@ -74,10 +76,38 @@ int main(int argc, char** argv)
 	double trott = vm["trott"].as<double>();
 
 	double U = vm["u"].as<double>();
-	double beta = vm["beta"].as<double>();
+	double tMin = vm["tMin"].as<double>();
+	double tMax = vm["tMax"].as<double>();
 	int nwarm = vm["warm"].as<int>();
 	int nmeas = vm["meas"].as<int>();
-	int l = (int)ceil(beta*sqrt(U/trott));
 
-	compute(n, l, vm["honey"].as<bool>(), beta, U, mu, nwarm, nmeas);
+	Gnuplot plot;
+	plot.setLabelX("T");
+	plot.setLabelY("magetization");
+	plot.setLogScaleX();
+	plot.setRangeX(tMin, tMax);
+
+	std::vector<double> xs, ys;
+	for(double T = tMax; T >= tMin; T *= 0.95)
+	{
+		// parameters for this run
+		double beta = 1/T;
+		int l = (int)ceil(beta*sqrt(U/trott));
+
+		// do the simulation
+		double mag = compute(n, l, vm.count("honey")!=0, beta, U, mu, nwarm, nmeas);
+
+		// plot the results
+		xs.push_back(T);
+		ys.push_back(mag);
+
+		if(xs.size() >= 2)
+		{
+			plot.clear();
+			plot.plotData(xs,ys, fmt::format("n={}, U={}", n, U));
+			plot.plotFunction([](double t){return 0.5+0.5/t;}, 2.0, tMax);
+		}
+	}
+
+	plot.writePNG("plot.png");
 }
