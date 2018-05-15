@@ -111,7 +111,7 @@ int main(int argc, char** argv)
 		pU.push_back(U);
 		pN.push_back(n);
 
-		for(double T = tMax; T >= tMin; T *= 0.95)
+		for(double T = tMax; T >= tMin; T *= 0.90)
 		{
 			// parameters for this run
 			double beta = 1/T;

@@ -17,12 +17,12 @@ Hubbard::Hubbard(bool honeycomb, int Nx, int Ny, int L)
 		for(int x = 0; x < Nx; ++x)
 			for(int y = 0; y < Ny; ++y)
 			{
-				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
-				K(((x+1)%Nx) + Nx*y, x + Nx*y) = 1.0;
+				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = -1.0;
+				K(((x+1)%Nx) + Nx*y, x + Nx*y) = -1.0;
 				if(x%2 == 0)
 				{
-					K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
-					K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
+					K(x + Nx*y, x + Nx*((y+1)%Ny)) = -1.0;
+					K(x + Nx*((y+1)%Ny), x + Nx*y) = -1.0;
 				}
 			}
 	}
@@ -32,12 +32,13 @@ Hubbard::Hubbard(bool honeycomb, int Nx, int Ny, int L)
 		for(int x = 0; x < Nx; ++x)
 			for(int y = 0; y < Ny; ++y)
 			{
-				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = 1.0;
-				K(((x+1)%Nx) + Nx*y, x + Nx*y) = 1.0;
-				K(x + Nx*y, x + Nx*((y+1)%Ny)) = 1.0;
-				K(x + Nx*((y+1)%Ny), x + Nx*y) = 1.0;
+				K(x + Nx*y, ((x+1)%Nx) + Nx*y) = -1.0;
+				K(((x+1)%Nx) + Nx*y, x + Nx*y) = -1.0;
+				K(x + Nx*y, x + Nx*((y+1)%Ny)) = -1.0;
+				K(x + Nx*((y+1)%Ny), x + Nx*y) = -1.0;
 			}
 	}
+
 	initRandom();
 }
 
@@ -52,12 +53,12 @@ void Hubbard::setParams(double beta, double U, double mu)
 	this->U = U;
 	this->mu = mu;
 	this->dt = beta/L;
-	this->lambda = acosh(exp(0.5*dt*U));
+	this->lambda = acosh(exp(0.5*dt*U))/dt;
 
 	// compute new kinetic operator
-	// (note: the off-diagonal elements are fixed by geometry)
+	// (note: the off-diagonal elements are fixed by geometry and hopping parameter)
 	for(int i = 0; i < N; ++i)
-		K(i,i) = mu;
+		K(i,i) = -mu;
 	expK = (-dt*K).exp();
 
 	// greens functions depend on K, so update them
@@ -72,6 +73,14 @@ void Hubbard::initRandom()
 	for(int i = 0; i < N; ++i)
 		for(int l = 0; l < L; ++l)
 			s(i,l) = dist(rng)?+1.0:-1.0;
+}
+
+MatrixXd Hubbard::makeBl(int l, int sigma)
+{
+	MatrixXd r = expK;
+	for(int i = 0; i < N; ++i)
+		r.col(i) *= exp(sigma*lambda*dt*s(i,l));
+	return r;
 }
 
 /** compute greens functions from scratch */
@@ -146,17 +155,6 @@ void Hubbard::computeGreens(int l0, int sigma)
 	else assert(false);
 }
 
-
-MatrixXd Hubbard::makeBl(int l, int sigma)
-{
-	MatrixXd r = expK;
-	for(int i = 0; i < N; ++i)
-		r.col(i) *= exp(sigma*lambda*s(i,l));
-	return r;
-}
-
-
-
 /** do one sweep of the simulation */
 void Hubbard::thermalize()
 {
@@ -170,10 +168,6 @@ void Hubbard::thermalize()
 		stackRightU.push(makeBl(l, +1).transpose());
 		stackRightD.push(makeBl(l, -1).transpose());
 	}
-
-
-	MatrixXd gu_naive;
-	MatrixXd gd_naive;
 
 	for(int l = 0; l < L; ++l)
 	{
@@ -189,16 +183,16 @@ void Hubbard::thermalize()
 		for(int i = 0; i < N; ++i)
 		{
 			// propose to flip s[i,l]
-			double p = (1 + (1-gu(i,i))*(exp(-2*lambda*s(i,l))-1))
-			         * (1 + (1-gd(i,i))*(exp(+2*lambda*s(i,l))-1));
+			double p = (1 + (1-gu(i,i))*(exp(-2*lambda*dt*s(i,l))-1))
+			         * (1 + (1-gd(i,i))*(exp(+2*lambda*dt*s(i,l))-1));
 
 			if(std::bernoulli_distribution(std::min(1.0,p))(rng))
 			{
 				// update greens function (which is wrapped such that the update is at timeslice 0 of g)
-				double factorU = (exp(-2*lambda*s(i,l))-1)/(1 + (1-gu(i,i))*(exp(-2*lambda*s(i,l))-1));
+				double factorU = (exp(-2*lambda*dt*s(i,l))-1)/(1 + (1-gu(i,i))*(exp(-2*lambda*dt*s(i,l))-1));
 				gu += factorU*(gu.col(i)-VectorXd::Unit(N,i))*gu.row(i);
 
-				double factorD = (exp(+2*lambda*s(i,l))-1)/(1 + (1-gd(i,i))*(exp(+2*lambda*s(i,l))-1));
+				double factorD = (exp(+2*lambda*dt*s(i,l))-1)/(1 + (1-gd(i,i))*(exp(+2*lambda*dt*s(i,l))-1));
 				gd += factorD*(gd.col(i)-VectorXd::Unit(N,i))*gd.row(i);
 
 				// update field itself
@@ -211,13 +205,8 @@ void Hubbard::thermalize()
 		stackRightD.pop();
 		stackLeftU.push(makeBl(l, +1));
 		stackLeftD.push(makeBl(l, -1));
-
-		// 'wrap' the greens functions
-		MatrixXd Blu = makeBl(l,+1);
-		gu_naive = Blu * gu * Blu.inverse();
-		MatrixXd Bld = makeBl(l,-1);
-		gd_naive = Bld * gd * Bld.inverse();
 	}
+
 	// end with good greens
 	gu = computeGreen(stackLeftU, stackRightU);
 	gd = computeGreen(stackLeftD, stackRightD);
